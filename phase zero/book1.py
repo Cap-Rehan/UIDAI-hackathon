@@ -80,11 +80,6 @@ enrol.drop(columns= ['date'], inplace= True)
 demo.drop(columns= ['date'], inplace= True)
 bio.drop(columns= ['date'], inplace= True)
 
-# %%
-# enrol.to_csv('enrol_clean.csv')
-# demo.to_csv('demo_clean.csv')
-# bio.to_csv('bio_clean.csv')
-
 # %% [markdown]
 # ## Feature Engineering
 
@@ -104,6 +99,11 @@ bio["bio_activity"] = (
     bio["bio_age_5_17"] +
     bio["bio_age_17_"]
 )
+
+# %%
+# enrol.to_csv('enrol_clean.csv')
+# demo.to_csv('demo_clean.csv')
+# bio.to_csv('bio_clean.csv')
 
 # %% [markdown]
 # ## Aggregate at District Level
@@ -223,3 +223,177 @@ plt.show()
 #
 # This insight is derived purely from aggregated activity patterns and does not rely
 # on individual-level behavior or assumptions.
+
+# %% [markdown]
+# # Pincode-Level Drill-Down
+
+# %%
+top10_districts = (
+    district_df
+    .sort_values("total_activity", ascending=False)
+    .head(10)[["state", "district"]]
+)
+
+top10_districts
+
+
+# %%
+def filter_top_districts(df, top_districts):
+    return df.merge(
+        top_districts,
+        on=["state", "district"],
+        how="inner"
+    )
+
+enrol_top = filter_top_districts(enrol, top10_districts)
+demo_top  = filter_top_districts(demo, top10_districts)
+bio_top   = filter_top_districts(bio, top10_districts)
+
+# %% [markdown]
+# ## Recompute Activity at Pincode Level
+
+# %%
+enrol_top["total_enrolments"] = (
+    enrol_top["age_0_5"] +
+    enrol_top["age_5_17"] +
+    enrol_top["age_18_greater"]
+)
+
+demo_top["demo_activity"] = (
+    demo_top["demo_age_5_17"] +
+    demo_top["demo_age_17_"]
+)
+
+bio_top["bio_activity"] = (
+    bio_top["bio_age_5_17"] +
+    bio_top["bio_age_17_"]
+)
+
+# %%
+enrol_pin = (
+    enrol_top.groupby(["state", "district", "pincode"], as_index=False)
+             ["total_enrolments"].sum()
+)
+
+demo_pin = (
+    demo_top.groupby(["state", "district", "pincode"], as_index=False)
+            ["demo_activity"].sum()
+)
+
+bio_pin = (
+    bio_top.groupby(["state", "district", "pincode"], as_index=False)
+           ["bio_activity"].sum()
+)
+
+# %%
+pincode_df = (
+    enrol_pin
+    .merge(demo_pin, on=["state", "district", "pincode"], how="left")
+    .merge(bio_pin, on=["state", "district", "pincode"], how="left")
+)
+
+pincode_df.fillna(0, inplace=True)
+
+pincode_df["total_activity"] = (
+    pincode_df["total_enrolments"] +
+    pincode_df["demo_activity"] +
+    pincode_df["bio_activity"]
+)
+
+pincode_df.head()
+
+# %% [markdown]
+# ## Compute Pincode Share Within District
+
+# %%
+pincode_df["district_total_activity"] = (
+    pincode_df.groupby(["state", "district"])["total_activity"]
+              .transform("sum")
+)
+
+pincode_df["pincode_activity_share"] = (
+    pincode_df["total_activity"] /
+    pincode_df["district_total_activity"]
+)
+
+# %% [markdown]
+# ## Identify Pincode “Gravity Points”
+
+# %%
+gravity_pincodes = pincode_df[
+    pincode_df["pincode_activity_share"] >= 0.10
+].sort_values(
+    ["state", "district", "pincode_activity_share"],
+    ascending=False
+)
+
+gravity_pincodes
+
+# %% [markdown]
+# ## Visualization: Pincode Concentration
+
+# %%
+sns.set_context("talk")
+sns.set_style("white")
+plt.rcParams["figure.figsize"] = (12, 8)
+plt.rcParams["figure.dpi"] = 227
+
+# 1. PREPARE & SORT THE DATA
+top_pins_clean = gravity_pincodes.head(10).copy()
+top_pins_clean = top_pins_clean.sort_values("pincode_activity_share", ascending=False)
+
+if 'pincode' in top_pins_clean.columns:
+    top_pins_clean['pincode'] = top_pins_clean['pincode'].astype(str)
+
+# 2. PLOT
+ax = sns.barplot(
+    data=top_pins_clean,
+    y="pincode",
+    x="pincode_activity_share",
+    hue="district",
+    palette="mako",
+    dodge=False
+)
+
+# 3. TITLES (Center Aligned)
+plt.figtext(0.5, 0.93, "Pincode-Level Activity Concentration", 
+            fontsize=24, weight='bold', ha='center')
+
+plt.figtext(0.5, 0.88, "Top pincodes driving the highest share of their district's total load", 
+            fontsize=14, color='#666666', ha='center')
+
+# 4. DATA LABELS
+for container in ax.containers:
+    # fmt='%.2f' is good, but %.0% (e.g., 19%) might be faster to read for judges
+    ax.bar_label(container, fmt='%.3f', padding=-50, fontsize=12, color='white', weight='bold')
+
+# 5. CLEANUP
+plt.xlabel("")
+plt.ylabel("")
+plt.xticks([]) 
+sns.despine(left=True, bottom=True)
+
+# 6. LEGEND (Lower Right)
+sns.move_legend(
+    ax, "lower right",
+    bbox_to_anchor=(1, 0),
+    title="",
+    frameon=False,
+)
+
+# 7. LAYOUT
+plt.tight_layout(rect=[0, 0, 1, 0.85])
+plt.show()
+
+# %% [markdown]
+# ## Insight: Pincode-Level Concentration Effects
+#
+# ### Within high-load districts, Aadhaar activity is not evenly distributed across pincodes. A small number of pincodes account for a disproportionate share of total activity.
+#
+# These pincodes act as local “gravity points” where:
+# - Service demand is highly concentrated
+# - Infrastructure stress is localized
+# - Small capacity upgrades can have outsized impact
+#
+# This insight enables targeted, pincode-level operational planning
+# within already identified high-load districts.
