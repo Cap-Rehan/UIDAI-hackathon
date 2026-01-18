@@ -73,12 +73,18 @@ enrol= pd.concat([enrol1, enrol2, enrol3], ignore_index= True)
 demo= pd.concat([demo1, demo2, demo3, demo4, demo5], ignore_index= True)
 bio= pd.concat([bio1, bio2, bio3, bio4], ignore_index= True)
 
-# %%
-enrol.drop(columns= ['date'], inplace= True)
+# %% [markdown]
+# ## Date Processing
 
 # %%
-demo.drop(columns= ['date'], inplace= True)
-bio.drop(columns= ['date'], inplace= True)
+enrol['date'] = pd.to_datetime(enrol['date'], format='%d-%m-%Y')
+enrol['month'] = enrol['date'].dt.to_period('M')
+
+demo['date'] = pd.to_datetime(demo['date'], format='%d-%m-%Y')
+demo['month'] = demo['date'].dt.to_period('M')
+
+bio['date'] = pd.to_datetime(bio['date'], format='%d-%m-%Y')
+bio['month'] = bio['date'].dt.to_period('M')
 
 # %% [markdown]
 # ## Feature Engineering
@@ -100,29 +106,64 @@ bio["bio_activity"] = (
     bio["bio_age_17_"]
 )
 
+# %% [markdown]
+# ## Calculate Monthly Volatility (Consistency Check)
+
 # %%
-# enrol.to_csv('enrol_clean.csv')
-# demo.to_csv('demo_clean.csv')
-# bio.to_csv('bio_clean.csv')
+monthly_demo = (
+    demo.groupby(['state', 'district', 'pincode', 'month'], as_index=False)
+        ['demo_activity'].sum()
+)
+
+monthly_bio = (
+    bio.groupby(['state', 'district', 'pincode', 'month'], as_index=False)
+       ['bio_activity'].sum()
+)
+
+monthly_load = monthly_demo.merge(
+    monthly_bio,
+    on=['state', 'district', 'pincode', 'month'],
+    how='outer'
+)
+monthly_load.fillna(0, inplace=True)
+
+monthly_load['monthly_total'] = (
+    monthly_load['demo_activity'] +
+    monthly_load['bio_activity']
+)
+
+# %%
+consistency_metrics = (
+    monthly_load.groupby(['state', 'district', 'pincode'])['monthly_total']
+                .agg(['mean', 'std'])
+                .reset_index()
+)
+
+consistency_metrics.rename(
+    columns={'mean': 'avg_monthly_load', 'std': 'load_volatility'},
+    inplace=True
+)
+
+consistency_metrics['load_volatility'].fillna(0, inplace=True)
 
 # %% [markdown]
-# ## Aggregate at District Level
+# ## Aggregate at Pincode Level
 
 # %%
-enrol_dist = (
-    enrol.groupby(["state", "district"], as_index=False)
+enrol_pin = (
+    enrol.groupby(["state", "district", "pincode"], as_index=False)
          ["total_enrolments"]
          .sum()
 )
 
-demo_dist = (
-    demo.groupby(["state", "district"], as_index=False)
+demo_pin = (
+    demo.groupby(["state", "district", "pincode"], as_index=False)
         ["demo_activity"]
         .sum()
 )
 
-bio_dist = (
-    bio.groupby(["state", "district"], as_index=False)
+bio_pin = (
+    bio.groupby(["state", "district", "pincode"], as_index=False)
        ["bio_activity"]
        .sum()
 )
@@ -131,26 +172,48 @@ bio_dist = (
 # ## Merge Datasets
 
 # %%
-district_df = (
-    enrol_dist
-    .merge(demo_dist, on=["state", "district"], how="left")
-    .merge(bio_dist, on=["state", "district"], how="left")
+pincode_df = (
+    enrol_pin
+    .merge(demo_pin, on=["state", "district", "pincode"], how="left")
+    .merge(bio_pin, on=["state", "district", "pincode"], how="left")
+    .merge(consistency_metrics, on=["state", "district", "pincode"], how="left")
 )
 
-district_df.fillna(0, inplace=True)
+pincode_df.fillna(0, inplace=True)
 
 # %%
-district_df.head()
+pincode_df.head()
 
 # %% [markdown]
 # ## Compute Operational Load
 
 # %%
-district_df["total_activity"] = (
-    district_df["total_enrolments"] +
-    district_df["demo_activity"] +
-    district_df["bio_activity"]
+pincode_df["total_activity"] = (
+    pincode_df["total_enrolments"] +
+    pincode_df["demo_activity"] +
+    pincode_df["bio_activity"]
 )
+pincode_df["activity_per_enrolment"] = (
+    pincode_df["total_activity"] /
+    pincode_df["total_enrolments"].replace(0, np.nan)
+)
+
+# %% [markdown]
+# ## Aggregate to District Level (for Hotspot Identification)
+
+# %%
+district_df = (
+    pincode_df.groupby(["state", "district"], as_index=False)
+              .agg({
+                  "total_enrolments": "sum",
+                  "demo_activity": "sum",
+                  "bio_activity": "sum",
+                  "total_activity": "sum",
+                  "avg_monthly_load": "mean",
+                  "load_volatility": "mean"
+              })
+)
+
 district_df["activity_per_enrolment"] = (
     district_df["total_activity"] /
     district_df["total_enrolments"].replace(0, np.nan)
@@ -236,92 +299,36 @@ top10_districts = (
 
 top10_districts
 
-
 # %%
-def filter_top_districts(df, top_districts):
-    return df.merge(
-        top_districts,
-        on=["state", "district"],
-        how="inner"
-    )
-
-enrol_top = filter_top_districts(enrol, top10_districts)
-demo_top  = filter_top_districts(demo, top10_districts)
-bio_top   = filter_top_districts(bio, top10_districts)
-
-# %% [markdown]
-# ## Recompute Activity at Pincode Level
-
-# %%
-enrol_top["total_enrolments"] = (
-    enrol_top["age_0_5"] +
-    enrol_top["age_5_17"] +
-    enrol_top["age_18_greater"]
-)
-
-demo_top["demo_activity"] = (
-    demo_top["demo_age_5_17"] +
-    demo_top["demo_age_17_"]
-)
-
-bio_top["bio_activity"] = (
-    bio_top["bio_age_5_17"] +
-    bio_top["bio_age_17_"]
+pincode_top = pincode_df.merge(
+    top10_districts,
+    on=["state", "district"],
+    how="inner"
 )
 
 # %%
-enrol_pin = (
-    enrol_top.groupby(["state", "district", "pincode"], as_index=False)
-             ["total_enrolments"].sum()
-)
-
-demo_pin = (
-    demo_top.groupby(["state", "district", "pincode"], as_index=False)
-            ["demo_activity"].sum()
-)
-
-bio_pin = (
-    bio_top.groupby(["state", "district", "pincode"], as_index=False)
-           ["bio_activity"].sum()
-)
-
-# %%
-pincode_df = (
-    enrol_pin
-    .merge(demo_pin, on=["state", "district", "pincode"], how="left")
-    .merge(bio_pin, on=["state", "district", "pincode"], how="left")
-)
-
-pincode_df.fillna(0, inplace=True)
-
-pincode_df["total_activity"] = (
-    pincode_df["total_enrolments"] +
-    pincode_df["demo_activity"] +
-    pincode_df["bio_activity"]
-)
-
-pincode_df.head()
+pincode_top.head()
 
 # %% [markdown]
 # ## Compute Pincode Share Within District
 
 # %%
-pincode_df["district_total_activity"] = (
-    pincode_df.groupby(["state", "district"])["total_activity"]
-              .transform("sum")
+pincode_top["district_total_activity"] = (
+    pincode_top.groupby(["state", "district"])["total_activity"]
+               .transform("sum")
 )
 
-pincode_df["pincode_activity_share"] = (
-    pincode_df["total_activity"] /
-    pincode_df["district_total_activity"]
+pincode_top["pincode_activity_share"] = (
+    pincode_top["total_activity"] /
+    pincode_top["district_total_activity"]
 )
 
 # %% [markdown]
-# ## Identify Pincode “Gravity Points”
+# ## Identify Pincode "Gravity Points"
 
 # %%
-gravity_pincodes = pincode_df[
-    pincode_df["pincode_activity_share"] >= 0.10
+gravity_pincodes = pincode_top[
+    pincode_top["pincode_activity_share"] >= 0.10
 ].sort_values(
     ["state", "district", "pincode_activity_share"],
     ascending=False
@@ -390,7 +397,7 @@ plt.show()
 #
 # ### Within high-load districts, Aadhaar activity is not evenly distributed across pincodes. A small number of pincodes account for a disproportionate share of total activity.
 #
-# These pincodes act as local “gravity points” where:
+# These pincodes act as local "gravity points" where:
 # - Service demand is highly concentrated
 # - Infrastructure stress is localized
 # - Small capacity upgrades can have outsized impact
