@@ -17,6 +17,9 @@
 # # HeatMap baby
 
 # %%
+# OPTIMIZATION: Import processed data from book1 instead of reloading raw files.
+from book1 import district_df
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -26,65 +29,41 @@ plt.rcParams["figure.figsize"] = (10, 6)
 plt.rcParams["figure.dpi"] = 227
 sns.set_style("whitegrid")
 
-# %%
-enrol= pd.read_parquet("/Users/mrehanansari/Documents/UIDAI/data/parquet/enrol_clean.parquet")
-demo= pd.read_parquet("/Users/mrehanansari/Documents/UIDAI/data/parquet/demo_clean.parquet")
-bio= pd.read_parquet("/Users/mrehanansari/Documents/UIDAI/data/parquet/bio_clean.parquet")
+# %% [markdown]
+# ## Re-Aggregate to District Level
+# *Optimized: Rolling up granular Pincode data to District level for State comparison.*
 
 # %%
-enrol.drop(columns= ['Unnamed: 0'], inplace= True)
-demo.drop(columns= ['Unnamed: 0'], inplace= True)
-bio.drop(columns= ['Unnamed: 0'], inplace= True)
+# 1. Group Pincodes back into Districts
+# We sum the specific columns needed for the ratio calculation
+district_agg = district_df.groupby(['state', 'district'])[[
+    'total_enrolments', 'demo_activity', 'bio_activity'
+]].sum().reset_index()
 
-# %%
-enrol_dist = (
-    enrol.groupby(["state", "district"], as_index=False)
-         ["total_enrolments"].sum()
-)
-demo_dist = demo.groupby(["state", "district"], as_index=False)["demo_activity"].sum()
-bio_dist  = bio.groupby(["state", "district"], as_index=False)["bio_activity"].sum()
-
-# %%
-district_df = (
-    enrol_dist
-    .merge(demo_dist, on=["state", "district"], how="left")
-    .merge(bio_dist,  on=["state", "district"], how="left")
-    .fillna(0)
+# 2. Recalculate Metrics for Visualization
+district_agg["total_update_activity"] = (
+    district_agg["demo_activity"] + district_agg["bio_activity"]
 )
 
-district_df["total_update_activity"] = (
-    district_df["demo_activity"] + district_df["bio_activity"]
+district_agg["update_to_enrolment_ratio"] = (
+    district_agg["total_update_activity"] /
+    district_agg["total_enrolments"].replace(0, np.nan)
 )
 
-district_df["update_to_enrolment_ratio"] = (
-    district_df["total_update_activity"] /
-    district_df["total_enrolments"].replace(0, np.nan)
-)
-
-# %%
-MIN_ACTIVITY = district_df["total_update_activity"].quantile(0.75)
-
-heatmap_df = district_df[
-    district_df["total_update_activity"] >= MIN_ACTIVITY
-]
-
-# %%
-pivot = heatmap_df.pivot(
-    index="district",
-    columns="state",
-    values="update_to_enrolment_ratio"
-)
+# %% [markdown]
+# ## Visualization: Regional Pressure Distribution
 
 # %%
 sns.set_context("talk")
 sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (14, 10)
 
-# 1. CLEAN DATA (CRITICAL: Do this BEFORE filtering)
-plot_data = district_df.copy()
+# 1. CLEAN DATA
+plot_data = district_agg.copy()
 
-# Fix District Names (e.g., 'Medchal?malkajgiri' -> 'Medchal-Malkajgiri')
-plot_data['district'] = plot_data['district'].astype(str).str.replace('?', '-')
+# Fix District Names
+if 'district' in plot_data.columns:
+    plot_data['district'] = plot_data['district'].astype(str).str.replace('?', '-')
 
 # Fix State Names (Title Case, Strip, and Specific Replacements)
 plot_data['state'] = plot_data['state'].str.title().str.strip()
@@ -96,11 +75,12 @@ plot_data['state'] = plot_data['state'].replace({
 })
 
 # 2. FILTER OUTLIERS & SELECT TOP STATES
-# Identify Outliers (Ratio > 150) to handle separately
+# Identify Extreme Outliers (> 150 ratio)
 outliers = plot_data[plot_data["update_to_enrolment_ratio"] > 150].sort_values("update_to_enrolment_ratio", ascending=False)
 normal_data = plot_data[plot_data["update_to_enrolment_ratio"] <= 150]
 
-# Filter: Only show Top 20 States with the highest 'Max' pressure to reduce clutter
+# Filter: Only show Top 20 States with the highest 'Max' pressure
+# This keeps the chart readable
 top_states_list = normal_data.groupby('state')['update_to_enrolment_ratio'].max().sort_values(ascending=False).head(20).index
 filtered_data = normal_data[normal_data['state'].isin(top_states_list)]
 
@@ -119,7 +99,7 @@ ax = sns.stripplot(
     order=top_states_list
 )
 
-# --- NEW: Vertical Gridlines for Readability ---
+# Vertical Gridlines for Readability
 ax.grid(True, axis='x', color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
 
 # 4. TITLES
@@ -138,21 +118,23 @@ if ax.legend_:
     ax.legend_.remove()
 
 # 6. ADD "OUTLIER BOX"
-outlier_text = "!! EXTREME OUTLIERS (OFF-CHART) !!:\n" + "\n".join(
-    [f"• {row['district']} ({row['state']}): {row['update_to_enrolment_ratio']:.0f}" 
-     for _, row in outliers.head(5).iterrows()]
-)
+# Only add if outliers exist to prevent errors
+if not outliers.empty:
+    outlier_text = "!! EXTREME OUTLIERS (OFF-CHART) !!:\n" + "\n".join(
+        [f"• {row['district']} ({row['state']}): {row['update_to_enrolment_ratio']:.0f}" 
+         for _, row in outliers.head(5).iterrows()]
+    )
 
-plt.text(
-    x=0.98, y=0.02, # Bottom Right position
-    s=outlier_text,
-    transform=ax.transAxes, # Relative to box coordinates
-    fontsize=12,
-    color="#800000",
-    bbox=dict(boxstyle="round,pad=0.5", fc="#ffeaea", ec="#800000", alpha=0.9),
-    ha="right",
-    va="bottom"
-)
+    plt.text(
+        x=0.98, y=0.02, # Bottom Right position
+        s=outlier_text,
+        transform=ax.transAxes,
+        fontsize=12,
+        color="#800000",
+        bbox=dict(boxstyle="round,pad=0.5", fc="#ffeaea", ec="#800000", alpha=0.9),
+        ha="right",
+        va="bottom"
+    )
 
 # 7. LAYOUT
 sns.despine(left=True, bottom=True)
