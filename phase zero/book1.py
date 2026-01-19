@@ -236,42 +236,78 @@ hotspots.head()
 # ## Visualization: Top Load Districts
 
 # %%
-top10 = hotspots.head(10)
+import matplotlib.patches as patches
 
-sns.set_context("talk")
-sns.set_style("white") # Remove grid for a cleaner look
+# 1. Prepare Data for Table
+top10_table = hotspots.head(10).copy().reset_index(drop=True)
+top10_table["rank"] = top10_table.index + 1
 
-# plot
-ax = sns.barplot(
-    data=top10,
-    y="district",
-    x="total_activity",
-    hue="state",
-    palette="mako", # 'mako' is a very sleek teal/blue palette
-    dodge=False
-)
+# 2. Setup Plot
+fig, ax = plt.subplots(figsize=(12, 8), dpi=227)
+ax.set_xlim(0, 1)
+ax.set_ylim(0, 11) 
+ax.axis('off')
 
-plt.text(x=0, y=1.1, s="Top 10 Districts: Aadhaar Operational Load", 
-         fontsize=24, weight='bold', ha='left', va='bottom', transform=ax.transAxes)
+# 3. Define Layout & Colors
+colors = {
+    'top3_bg': '#2c3e50',   # Dark Slate Blue/Grey
+    'top3_text': 'white',
+    'rest_bg': '#ecf0f1',   # Very Light Grey
+    'rest_text': '#2c3e50',
+    'header_text': '#7f8c8d'
+}
 
-plt.text(x=0, y=1.04, s="Districts ranked by total enrolments and updates combined", 
-         fontsize=14, color='#666666', ha='left', va='bottom', transform=ax.transAxes)
+# 4. Draw Header
+header_y = 9.4
 
-# --- Data Labels ---
-# Added color='white' for better contrast against the dark bars
-for container in ax.containers:
-    ax.bar_label(container, fmt='%d', padding=-60, fontsize=12, color='white', weight='bold')
+plt.text(0.06, header_y, "RANK", weight='bold', size=12, color=colors['header_text'], ha='center')
+plt.text(0.15, header_y, "DISTRICT", weight='bold', size=12, color=colors['header_text'], ha='left')
+plt.text(0.50, header_y, "STATE", weight='bold', size=12, color=colors['header_text'], ha='left')
+plt.text(0.95, header_y, "TOTAL LOAD", weight='bold', size=12, color=colors['header_text'], ha='right')
 
-# Cleanup
-plt.xlabel("")
-plt.ylabel("") 
-plt.xticks([]) # Remove x-axis numbers
-sns.despine(left=True, bottom=True) # Remove border
+# 5. Loop to Draw Rows
+start_y = 9.0 
 
-# Legend
-plt.legend(loc="lower right", frameon=False)
-plt.subplots_adjust(top=0.85)
+for idx, row in top10_table.iterrows():
+    # Determine Style
+    if idx < 3: 
+        bg_color = colors['top3_bg']
+        txt_color = colors['top3_text']
+        font_weight = 'bold'
+    else:       
+        bg_color = colors['rest_bg']
+        txt_color = colors['rest_text']
+        font_weight = 'normal'
+    
+    # Draw Row Background
+    rect = patches.Rectangle((0, start_y - 0.5), 1, 0.7, linewidth=0, facecolor=bg_color)
+    ax.add_patch(rect)
+    
+    # Add Text Data
+    plt.text(0.06, start_y - 0.15, f"#{row['rank']}", 
+             size=14, color=txt_color, weight='bold', ha='center', va='center')
+    
+    plt.text(0.15, start_y - 0.15, row['district'], 
+             size=14, color=txt_color, weight=font_weight, ha='left', va='center')
+    
+    plt.text(0.50, start_y - 0.15, row['state'], 
+             size=14, color=txt_color, weight='normal', ha='left', va='center')
+    
+    plt.text(0.95, start_y - 0.15, f"{int(row['total_activity']):,}", 
+             size=14, color=txt_color, weight=font_weight, ha='right', va='center')
+    
+    # Move down for next row
+    start_y -= 0.85
 
+# 6. Titles (Now Center Aligned)
+plt.text(0.5, 10.6, "Operational Load Hotspots: Top 10 Priority List", 
+         fontsize=24, weight='bold', ha='center')
+
+plt.text(0.5, 10.2, "Districts requiring immediate infrastructure review (Top 3 highlighted)", 
+         fontsize=14, color='#666666', ha='center')
+
+# 7. Layout Adjustments
+plt.subplots_adjust(top=0.90, bottom=0.05, left=0.05, right=0.95)
 plt.show()
 
 # %% [markdown]
@@ -364,7 +400,7 @@ ax = sns.barplot(
 
 # 3. TITLES (Center Aligned)
 plt.figtext(0.5, 0.93, "Pincode-Level Activity Concentration", 
-            fontsize=24, weight='bold', ha='center')
+            fontsize=30, weight='bold', ha='center')
 
 plt.figtext(0.5, 0.88, "Top pincodes driving the highest share of their district's total load", 
             fontsize=14, color='#666666', ha='center')

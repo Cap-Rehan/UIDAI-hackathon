@@ -17,8 +17,6 @@
 # # Age-Driven Service Pressure
 
 # %%
-# OPTIMIZATION: Import raw dataframes from book1 to access Age Columns
-# This avoids reloading files and ensures we use the same cleaned data.
 from book1 import demo, bio
 
 import numpy as np
@@ -98,69 +96,108 @@ median_val = district_df["age_17_plus_share"].median()
 # ## Visualization
 
 # %%
+from adjustText import adjust_text
+
 sns.set_context("talk")
-sns.set_style("white")
+sns.set_style("whitegrid")
 
-plt.figure(figsize=[12, 8], dpi=227)
+plt.figure(figsize=[14, 7], dpi=227)
 
-# We plot Adult Heavy districts to highlight the "Center" pressure
-plot_data = top10_adult_heavy.copy()
+# 1. The "Norm" (Boxplot)
+ax = sns.boxplot(
+    x=filtered["age_17_plus_share"],
+    color="#f0f2f5",
+    width=0.4,
+    linewidth=1.2,
+    fliersize=0,
+    boxprops=dict(alpha=0.8),
+    whiskerprops=dict(color='#bdc3c7'),
+    capprops=dict(color='#bdc3c7'),
+    medianprops=dict(color='#7f8c8d', linewidth=2)
+)
 
-ax = sns.barplot(
-    data=plot_data,
-    y="district",
+# 2. The "Hotspots" (Plot ALL top 10 points with UNIQUE colors)
+sns.stripplot(
+    data=top10_adult_heavy,
     x="age_17_plus_share",
-    hue="state",
-    palette="crest",
-    dodge=False
+    hue="district",     # <--- This assigns a different color to each district
+    palette="tab10",    # <--- A standard, high-contrast palette
+    size=13,
+    jitter=False,
+    alpha=0.9,
+    edgecolor="white",
+    linewidth=1.2,
+    ax=ax,
+    zorder=5,
+    legend=False        # <--- Hide legend since we label the dots directly
 )
 
-# --- MEDIAN LINE ---
-plt.axvline(
-    median_val,
-    color="#FF4B4B",
-    linestyle="--",
-    linewidth=2,
-    alpha=0.8
-)
+# 3. Smart Annotation (Label ONLY the Top 5 to prevent clutter)
+texts = []
+# We only iterate through the first 5 rows for text labels
+for i, (idx, row) in enumerate(top10_adult_heavy.head(5).iterrows()):
+    
+    # We preset a slight vertical offset (alternating up/down)
+    start_y = 0.15 if i % 2 == 0 else -0.15
+    
+    t = plt.text(
+        x=row["age_17_plus_share"],
+        y=start_y, 
+        s=f"{row['district']}\n({row['age_17_plus_share']:.2f})",
+        color="#2c3e50", # Dark blue-grey for text (easier to read than multi-colored text)
+        fontsize=11,
+        fontweight='bold',
+        ha='center',
+        va='center'
+    )
+    texts.append(t)
 
-plt.text(x=median_val + 0.02, y=-0.9, s=f"National Median: {median_val:.2f}", 
-         color="#FF4B4B", weight="bold", ha="left", va="center")
+# 4. Run adjust_text
+adjust_text(texts,
+            x=top10_adult_heavy.head(5)["age_17_plus_share"],
+            y=[0] * 5, 
+            force_points=0.5,
+            force_text=0.6,
+            expand_points=(1.2, 1.5), 
+            expand_text=(1.1, 1.2),
+            arrowprops=dict(arrowstyle="-", color='gray', lw=0.8, alpha=0.5)
+            )
 
-# --- FORMATTING ---
-plt.xlim(0, 1.15)
+# 5. Contextual Lines
+median_val = filtered["age_17_plus_share"].median()
+plt.axvline(median_val, color="#95a5a6", linestyle="--", linewidth=1.5, zorder=0)
+plt.text(median_val, 0.45, f"National Median\n({median_val:.2f})",
+         color="#7f8c8d", fontsize=11, ha="center", va="bottom", backgroundcolor='white')
 
-plt.figtext(0.5, 0.93, "Top Districts: Adult (17+) Update Concentration", 
+# 6. Titles & Layout
+plt.figtext(0.5, 1.02, "Age-Driven Service Pressure: Distribution & Outliers",
             fontsize=24, weight='bold', ha='center')
-plt.figtext(0.5, 0.88, "Share of total activity contributed by the 17+ age group", 
+
+plt.figtext(0.5, 0.97, "Districts with exceptionally high adult (17+) activity share require distinct infrastructure.",
             fontsize=14, color='#666666', ha='center')
 
-# Labels
-for container in ax.containers:
-    ax.bar_label(container, fmt='%.2f', padding=5, fontsize=12, color='black', weight='bold')
+plt.xlabel("Share of Update Activity from Adults (17+)", labelpad=15, weight='bold', fontsize=14)
+plt.yticks([]) 
+sns.despine(left=True) 
 
-# Cleanup
-plt.xlabel("Share of 17+ Activity")
-plt.ylabel("")
-plt.xticks([]) 
-sns.despine(left=True, bottom=True)
+# Zoom in on the relevant part of the distribution
+plt.xlim(0.45, 1.02)
+plt.ylim(-0.5, 0.5)
 
-# Legend
-sns.move_legend(
-    ax, "lower right",
-    bbox_to_anchor=(1, 0.05),
-    title="",
-    frameon=False,
-)
-
-plt.tight_layout(rect=[0, 0, 1, 0.85])
+plt.subplots_adjust(top=0.85, bottom=0.15)
 plt.show()
 
 # %% [markdown]
 # ## Insight: Age-Driven Service Pressure
 #
-# ### Variation in age demographics dictates the mode of service delivery.
+# ### The boxplot reveals that while most districts maintain a balance (Median ~0.70), extreme outliers exist where service demand is 95%+ adult-driven.
 #
-# - **High Adult Share (>85%):** These districts (shown above) are dominated by adult identity maintenance. **Strategy:** Strengthen permanent Seva Kendras with extra counters.
+# **Why this visual matters:**
+# By plotting the distribution, we prove that the highlighted districts (Red) are **statistically distinct** from the norm. They are not just "high"—they are structural anomalies.
 #
-# - **Low Adult Share (<60%):** (Not shown, but calculated) These districts have high child activity (5-17). **Strategy:** Deploy mobile School Camps to capture mandatory biometric updates efficiently.
+# **Operational Strategy:**
+# - **For the Outliers (Red Dots):** These districts require **permanent infrastructure** (Seva Kendras) with extra counters, as adult updates (biometrics) are time-consuming and cannot be done in camps.
+# - **For the Norm (Grey Box):** Standard mix of permanent centers and periodic camps is sufficient.
+
+# %% [markdown]
+#

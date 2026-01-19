@@ -83,91 +83,88 @@ region_df[
 ].describe()
 
 # %% [markdown]
-# ## Identify Update-Heavy
+# ## Visualization 1: Spatial Distribution (Update Pressure)
+# *Replaces the simple top-10 list with a distribution heatmap across states.*
 
 # %%
-ratio_threshold = region_df["update_to_enrolment_ratio"].quantile(0.90)
-
-update_heavy = region_df[
-    region_df["update_to_enrolment_ratio"] >= ratio_threshold
-].sort_values("update_to_enrolment_ratio", ascending=False)
-
-# %%
-print(f"Update-heavy districts found: {len(update_heavy)}")
-update_heavy.head(10)
-
-# %% [markdown]
-# ## Visualization 1: Ratio-Based Stress
-
-# %%
-import textwrap
-
-# Fix the Warning: Use .copy() to create a standalone table
-top10_ratio = update_heavy.head(10).copy()
-
-# --- FIX 1: HANDLE LONG NAMES (Word Wrap) ---
-# Wraps names longer than 20 characters
-top10_ratio['district'] = top10_ratio['district'].apply(
-    lambda x: textwrap.fill(x, 15) if len(x) > 20 else x
-)
-
-# Create new figure for Graph 1
-fig1, ax1 = plt.subplots(figsize=(12, 8), dpi=150)
-
 sns.set_context("talk")
-sns.set_style("white")
+sns.set_style("whitegrid") # Grid is essential for reading the strip plot values
+plt.rcParams["figure.figsize"] = (14, 10)
 
-# Create the Plot
-sns.barplot(
-    data=top10_ratio,
-    y="district",
+# 1. PREPARE DATA
+plot_data = region_df.copy()
+
+# 2. FILTER OUTLIERS & SELECT TOP STATES
+# Identify Extreme Outliers (> 150 ratio) to keep the chart readable
+outliers = plot_data[plot_data["update_to_enrolment_ratio"] > 150].sort_values("update_to_enrolment_ratio", ascending=False)
+normal_data = plot_data[plot_data["update_to_enrolment_ratio"] <= 150]
+
+# Filter: Only show Top 20 States with the highest 'Max' pressure to reduce clutter
+top_states_list = normal_data.groupby('state')['update_to_enrolment_ratio'].max().sort_values(ascending=False).head(20).index
+filtered_data = normal_data[normal_data['state'].isin(top_states_list)]
+
+# 3. PLOT: HORIZONTAL STRIP PLOT
+ax = sns.stripplot(
+    data=filtered_data,
+    y="state",
     x="update_to_enrolment_ratio",
-    hue="state",
-    palette="rocket",
-    dodge=False,
-    errorbar=None, # --- FIX 2: REMOVE THE BLACK LINE ---
-    ax=ax1
+    hue="update_to_enrolment_ratio",
+    palette="rocket_r",
+    size=7,
+    alpha=0.7,
+    jitter=0.25,
+    edgecolor="#555555",
+    linewidth=0.5,
+    order=top_states_list
 )
 
-# --- FIX 3: CREATE SPACE FOR LEGEND ---
-# Extend x-axis to make room on the right
-max_val = top10_ratio['update_to_enrolment_ratio'].max()
-ax1.set_xlim(0, max_val * 0.8)
+# Vertical Gridlines for Readability
+ax.grid(True, axis='x', color='gray', linestyle='--', linewidth=0.5, alpha=0.3)
 
-# Title and Subtitle
-ax1.set_title("Top 10 Districts: Update-to-Enrolment Pressure\n", 
-              fontsize=30, weight='bold', loc='left', x= -0.1)
-ax1.text(0, 1.02, "Ratio of updates per new enrolment (Higher = More maintenance load)", 
-         fontsize=12, color='#666666', ha='left', transform=ax1.transAxes)
+# 4. TITLES
+plt.figtext(0.5, 0.96, "Spatial Distribution: Aadhaar Update Pressure (Top 20 States)", 
+            fontsize=24, weight='bold', ha='center')
 
-# Add Data Labels (White text inside bars)
-for container in ax1.containers:
-    ax1.bar_label(container, fmt='%.2f', padding=-50, fontsize=11, color='white', weight='bold')
+plt.figtext(0.5, 0.92, "Focusing on districts with ratio < 150. Extreme outliers excluded from visual.", 
+            fontsize=14, color='#666666', ha='center')
 
-# Clean Axes
-ax1.set_xlabel("")
-ax1.set_ylabel("")
-ax1.set_xticks([])
+# 5. CUSTOMIZE AXES
+plt.ylabel("")
+plt.xlabel("Update-to-Enrolment Ratio (Updates per New Enrolment)")
+
+# Remove Legend
+if ax.legend_:
+    ax.legend_.remove()
+
+# 6. ADD "OUTLIER BOX"
+if not outliers.empty:
+    outlier_text = "!! EXTREME OUTLIERS (OFF-CHART) !!:\n" + "\n".join(
+        [f"• {row['district']} ({row['state']}): {row['update_to_enrolment_ratio']:.0f}" 
+         for _, row in outliers.head(5).iterrows()]
+    )
+
+    plt.text(
+        x=0.98, y=0.02, # Bottom Right position
+        s=outlier_text,
+        transform=ax.transAxes,
+        fontsize=12,
+        color="#800000",
+        bbox=dict(boxstyle="round,pad=0.5", fc="#ffeaea", ec="#800000", alpha=0.9),
+        ha="right",
+        va="bottom"
+    )
+
+# 7. LAYOUT
 sns.despine(left=True, bottom=True)
-
-# Legend Fix: Move to lower right (now sits in the empty space)
-sns.move_legend(
-    ax1, "lower right",
-    bbox_to_anchor=(1, 0),
-    title="",
-    frameon=False,
-)
-
-plt.tight_layout()
+plt.tight_layout(rect=[0, 0, 1, 0.90])
 plt.show()
 
 # %% [markdown]
 # ## Insight: Update-Heavy but Enrolment-Light Regions
 #
-# ### Several districts exhibit update activity that is disproportionately high relative to their enrolment volume.
+# ### The strip plot reveals that while most districts maintain a healthy balance, specific "cluster states" exhibit disproportionately high update activity.
 #
-# This indicates that operational load in these regions is driven primarily by
-# identity maintenance rather than new enrolments.
+# This indicates that operational load in these regions (especially the red/orange outliers) is driven primarily by identity maintenance rather than new enrolments.
 #
 # Such districts require:
 # - Update-focused infrastructure planning
@@ -228,7 +225,7 @@ import textwrap
 # Fix the Warning: Use .copy() to create a standalone table
 top10_maintenance = maintenance_heavy.head(10).copy()
 
-# --- FIX 1: HANDLE LONG NAMES (DISTRICTS) ---
+# --- HANDLE LONG NAMES ---
 # This wraps any name longer than 20 chars into multiple lines
 top10_maintenance['district'] = top10_maintenance['district'].apply(
     lambda x: textwrap.fill(x, 15) if len(x) > 20 else x
@@ -246,7 +243,7 @@ top10_maintenance['dominant_need'] = top10_maintenance.apply(get_dominant_need, 
 # Create new figure for Graph 2
 fig2, ax2 = plt.subplots(figsize=(12, 8), dpi=150)
 
-sns.set_context("talk")
+# Reset style to white for bar chart (looks cleaner than grid)
 sns.set_style("white")
 
 # Create the Plot
@@ -261,7 +258,7 @@ sns.barplot(
     ax=ax2
 )
 
-# --- FIX 2: CREATE SPACE FOR LEGEND ---
+# --- CREATE SPACE FOR LEGEND ---
 # Get the maximum value and add padding to the right so the legend fits
 max_val = top10_maintenance['total_maintenance_ratio'].max()
 ax2.set_xlim(0, max_val * 0.8)
@@ -290,7 +287,7 @@ sns.move_legend(
     frameon=False,
 )
 
-# --- FIX 3: WRAP LEGEND TEXT ---
+# --- WRAP LEGEND TEXT ---
 # Access the legend created above and wrap the text to 20 characters
 for text in ax2.get_legend().get_texts():
     text.set_text(textwrap.fill(text.get_text(), 20))
@@ -311,38 +308,3 @@ plt.show()
 # - Allocate equipment budgets more precisely
 # - Deploy the RIGHT type of infrastructure to each district
 # - Avoid wasteful spending on wrong equipment
-#
-# *Note: Volume filter (>1000) ensures these are operationally significant districts, not statistical noise.*
-
-# %% [markdown]
-# ---
-
-# %% [markdown]
-# ## Contrast Check
-
-# %%
-# Comparing with high enrolment districts to see the difference
-region_df.sort_values(
-    "total_enrolments", ascending=False
-)[
-    ["state", "district", "total_enrolments", "update_to_enrolment_ratio", "total_maintenance_ratio"]
-].head(10)
-
-# %% [markdown]
-# ## Combined Insight: Update-Heavy but Enrolment-Light Regions
-#
-# ### Several districts exhibit update activity that is disproportionately high relative to their enrolment volume.
-#
-# **Graph 1 (Update-to-Enrolment Pressure)** shows us WHICH districts have high update pressure overall.
-#
-# **Graph 2 (Maintenance by Dominant Need)** tells us WHAT TYPE of updates are driving that pressure.
-#
-# Together, these insights enable:
-# - Update-focused infrastructure planning
-# - Capacity allocation based on lifecycle load, not population size
-# - Precise equipment deployment (Scanners vs Data Entry)
-#
-# This insight is derived entirely from relative, aggregated metrics and avoids
-# assumptions about individual behavior.
-#
-# *Note: We applied a volume filter (>1000) to ensure these are significant operational centers, not statistical noise.*
